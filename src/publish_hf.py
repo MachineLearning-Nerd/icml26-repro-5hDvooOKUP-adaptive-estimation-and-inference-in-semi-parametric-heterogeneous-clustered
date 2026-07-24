@@ -69,7 +69,8 @@ def build_pages(build_dir):
 
     # C3
     c3 = res["verdicts"]["C3_normality"][1]
-    rows = "\n".join(f"| {k} | {d.get('n_exact')}/{d.get('n_total')} | {d['var_ada']:.3f} | {d['var_ora']:.3f} | {d['var_ratio']:.3f} | {d['shapiro_p']:.3f} | {d['excess_kurt']:.3f} |"
+    norm = res.get("normality", {})
+    rows = "\n".join(f"| {k} | {norm.get(k,{}).get('n_exact','?')}/{norm.get(k,{}).get('n_total','?')} | {d['var_ada']:.3f} | {d['var_ora']:.3f} | {d['var_ratio']:.3f} | {d['shapiro_p']:.3f} | {d['excess_kurt']:.3f} |"
                      for k, d in c3.items())
     body = (f"**Theorem 3.6.** sqrt(N_k)(theta_hat-theta*) is asymptotically Normal with covariance "
             "**matching the oracle** (the specific claim the prior reproduction missed). Following "
