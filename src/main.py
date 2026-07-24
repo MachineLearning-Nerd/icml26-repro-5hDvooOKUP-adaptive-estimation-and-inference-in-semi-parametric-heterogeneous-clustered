@@ -55,6 +55,16 @@ def main():
     summary = sim["summary"]
     print("[main] simulation done", flush=True)
 
+    # compact per-run metrics for boxplots (drop the heavy per-task theta arrays)
+    method_names = list(sim["raw"][0]["methods"].keys())
+    per_run = {}
+    for mo in MODELS:
+        for de in DELTAS:
+            sub = [r for r in sim["raw"] if r["model"] == mo and abs(r["delta"] - de) < 1e-9]
+            per_run[f"{mo}_d{de:.4f}"] = {
+                me: dict(rmse=[r["methods"][me]["rmse"] for r in sub],
+                         ari=[r["methods"][me]["ari"] for r in sub]) for me in method_names}
+
     # --- Claim 3: normality from delta=1/3 subset -------------------------------
     norm_raw = {}
     for mo in MODELS:
@@ -89,7 +99,7 @@ def main():
     verdicts["C6_real_data"] = V.verify_claim6(real)
 
     log["elapsed_sec"] = round(time.time() - t0, 1)
-    result = dict(meta=log, summary=summary, normality=norm_out, rate_sweep=rate,
+    result = dict(meta=log, summary=summary, per_run=per_run, normality=norm_out, rate_sweep=rate,
                   heterogeneity=het, real_data=real, verdicts=verdicts)
 
     print("===RESULTS_JSON_BEGIN===", flush=True)
