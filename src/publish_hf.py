@@ -9,10 +9,11 @@ Usage:  uv run python -m src.publish_hf <build_dir> [--dry-run]
 from __future__ import annotations
 
 import json, os, sys, datetime
-from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub import HfApi, CommitOperationAdd
 
 
 SPACE_ID = "DineshAI/5hDvooOKUP"
+RAW = f"https://huggingface.co/spaces/{SPACE_ID}/resolve/main/files"
 
 
 def _cell(cell_id, title, body):
@@ -63,7 +64,7 @@ def build_pages(build_dir):
     body = (f"**Theorem 3.5 (rate).** For tasks in cluster k, ||theta_hat - theta*|| = O_P(N_k^-1/2). "
             "Sweeping per-task sample size, the semiparametric orthogonal estimator's RMSE decays "
             f"at log-log slopes {c2['slopes']} (at-or-faster than N_k^-1/2). "
-            "![rate](../files/fig_rate.png)")
+            f"![rate]({RAW}/fig_rate.png)")
     pages.update(claim_md("sp-claim-2", "Claim 2 — pooled rate (semiparametric)", verdicts["C2_pooled_rate"], body))
 
     # C3
@@ -74,14 +75,14 @@ def build_pages(build_dir):
             "**matching the oracle** (the specific claim the prior reproduction missed). Following "
             "Theorem 3.6 we condition on exact recovery (ARI=1, which holds w.h.p.).\n\n"
             "| Model | exact/total | Ada var | Oracle var | ratio | Shapiro p | excess kurt |\n|---|---|---|---|---|---|---|\n"
-            + rows + "\n\nCovariance ratio ≈ 1; both Gaussian. ![normality](../files/fig_normality.png)")
+            + rows + f"\n\nCovariance ratio ≈ 1; both Gaussian. ![normality]({RAW}/fig_normality.png)")
     pages.update(claim_md("sp-claim-3", "Claim 3 — normality matches oracle covariance", verdicts["C3_normality"], body))
 
     # C4
     c4 = res["verdicts"]["C4_heterogeneity"][1]
     body = (f"**Theorems 3.7-3.8.** Within-cluster heterogeneity xi=O(N_k^-1/2) preserves the pooled "
             f"rate. Slopes {c4['slopes']}; large-N recovery ARI {c4['large_n_ari']}. "
-            "![het](../files/fig_heterogeneity.png)")
+            f"![het]({RAW}/fig_heterogeneity.png)")
     pages.update(claim_md("sp-claim-4", "Claim 4 — heterogeneity (semiparametric)", verdicts["C4_heterogeneity"], body))
 
     # C5
@@ -91,7 +92,7 @@ def build_pages(build_dir):
     body = (f"**Section 4.4.** Across PLM/ATE/DID x delta in {{1/3,2/3,1}}, the adaptive method "
             "achieves ARI near 1 and the lowest RMSE, outperforming all five competing methods.\n\n"
             "| Cell | Ada ARI | Ada RMSE | Per RMSE | Ada beats baselines |\n|---|---|---|---|---|\n"
-            + rows + "\n\n![ari/rmse](../files/fig_ari_rmse.png)")
+            + rows + f"\n\n![ari/rmse]({RAW}/fig_ari_rmse.png)")
     pages.update(claim_md("sp-claim-5", "Claim 5 — simulations (ARI + baselines)", verdicts["C5_simulations"], body))
 
     # C6
@@ -209,9 +210,10 @@ def main(build_dir, dry_run=False):
         print("DRY RUN — not uploading.")
         return
     api = HfApi()
+    ops = [CommitOperationAdd(path_in_repo=r, path_or_fileobj=l)
+           for l, r in uploads if os.path.exists(l)]
     commit_info = api.create_commit(
-        repo_id=SPACE_ID, repo_type="space",
-        operations=[(l, "upload", r) for l, r in uploads if os.path.exists(l)],
+        repo_id=SPACE_ID, repo_type="space", operations=ops,
         commit_message="Faithful semiparametric reproduction (PLM/ATE/DID + adaptive fusion): claims 1-5 verified, 6 blocked",
     )
     print("uploaded:", commit_info)
