@@ -17,7 +17,7 @@ from . import verify as V
 from .realdata import run_realdata
 
 
-NMC = int(os.environ.get("ORX_NMC", "100")) if False else 100      # encoded in code (rule 3)
+NMC = 100            # Monte-Carlo replications per (model, delta) cell (encoded in code)
 NMC_RATE = 24
 NMC_HET = 24
 MODELS = ["PLM", "ATE", "DID"]
