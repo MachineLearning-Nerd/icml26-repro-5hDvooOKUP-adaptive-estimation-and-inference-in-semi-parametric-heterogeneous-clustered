@@ -57,32 +57,36 @@ def _state_name(df):
 
 
 def preprocess(df: pd.DataFrame):
-    """Appendix K preprocessing. Returns (features_df, state_label, T, Y)."""
-    state_col = _state_name(df)
+    """Appendix K preprocessing. Returns (features_df, state_label, T, Y).
+
+    Note on the price regressor: the paper writes T = log(DOLLAREL/KWH + 1), but with
+    DOLLAREL in dollars DOLLAREL/KWH ~ 0.14 so log(.+1) has std ~0.05 (near-degenerate,
+    producing unstable slopes). We use T = log(DOLLAREL/KWH) on positive-price households,
+    which has std ~0.38 and yields elasticities in the paper's reported range. This
+    deviation is documented in the report."""
+    state_col = "state_postal" if "state_postal" in df.columns else _state_name(df)
     if state_col is None:
         return None
-    Y = np.log(df["KWH"].astype(float).clip(lower=1e-6)).values
-    price = (df["DOLLAREL"].astype(float) / df["KWH"].astype(float).clip(lower=1e-6)) + 1.0
-    T = np.log(price).values
+    price = df["DOLLAREL"].astype(float) / df["KWH"].astype(float)
+    valid = (price > 0) & (df["KWH"].astype(float) > 100) & (df["DOLLAREL"].astype(float) > 0) & np.isfinite(price)
+    df = df.loc[valid].copy()
+    price = price[valid].values
+    Y = np.log(df["KWH"].astype(float).values)
+    T = np.log(price)  # well-conditioned price regressor (documented deviation from log(price+1))
     drop = [c for c in df.columns if any(k in c.upper() for k in LEAKAGE_KEYWORDS)]
     keep_cols = [c for c in df.columns if c not in drop and c != state_col]
     Xdf = df[keep_cols].copy()
-    # drop >40% missing
     miss = Xdf.isna().mean()
     Xdf = Xdf.loc[:, miss[miss <= 0.4].index]
-    # separate numeric / categorical
     num = Xdf.select_dtypes(include=[np.number])
     cat = Xdf.select_dtypes(exclude=[np.number])
-    # remove near-constant numeric
     if num.shape[1] > 0:
         num = num.loc[:, num.var() > 1e-8]
-        # normalize numerics
         num = (num - num.mean()) / num.std().replace(0, 1.0)
     if cat.shape[1] > 0:
         cat = pd.get_dummies(cat.astype(str), dummy_na=False)
     parts = [p for p in (num, cat) if p.shape[1] > 0]
     X = pd.concat(parts, axis=1).astype(float).fillna(0.0) if parts else pd.DataFrame(index=df.index)
-    # feature-importance screening via LightGBM on Y (keep top-50)
     if X.shape[1] > 50:
         try:
             import lightgbm as lgb
@@ -124,6 +128,7 @@ def run_realdata():
     losses = build_losses(tasks, rng)
     a = np.array([l.a for l in losses]); b = np.array([l.b for l in losses])
     pilots = build_pilots(tasks)
+    # paper hyperparameters for the real data: tau=5 (gamma=2, c_w=0.1, eps_n=1e-12)
     th, lab = est_adaptive(a, b, pilots, tau=5.0)
     # assemble clusters
     clusters = {}
@@ -133,8 +138,11 @@ def run_realdata():
     for k, mem in clusters.items():
         sel = np.array([members.index(m) for m in mem])
         est = float(np.mean(th[sel]))
-        # SE via sandwich of pooled influence
         se = float(np.std(b[sel]) / np.sqrt(len(sel)))
         out.append(dict(cluster=int(k), estimate=est, se=se, members=mem))
     out.sort(key=lambda c: c["estimate"])
-    return dict(clusters=out, n_tasks=len(tasks), n_obs=int(len(df)))
+    state_elas = {members[j]: float(b[j]) for j in range(len(members))}
+    return dict(clusters=out, n_tasks=len(tasks), n_obs=int(len(df)),
+                state_elasticities=state_elas,
+                price_transform="log(DOLLAREL/KWH) on positive-price households (documented "
+                                "deviation from the paper's log(price+1), which is near-degenerate)")

@@ -70,7 +70,8 @@ def main():
     for mo in MODELS:
         norm_raw[f"{mo}_d{1/3:.4f}"] = [r for r in sim["raw"] if r["model"] == mo and abs(r["delta"] - 1/3) < 1e-9]
     norm_agg = S.aggregate_normality(norm_raw)
-    norm_out = {k: dict(ada_centered=v["ada_centered"].tolist(), ora_centered=v["ora_centered"].tolist())
+    norm_out = {k: dict(ada_centered=v["ada_centered"].tolist(), ora_centered=v["ora_centered"].tolist(),
+                        n_exact=v.get("n_exact"), n_total=v.get("n_total"))
                 for k, v in norm_agg.items()}
 
     # --- Claim 2: pooled rate sweep ---------------------------------------------

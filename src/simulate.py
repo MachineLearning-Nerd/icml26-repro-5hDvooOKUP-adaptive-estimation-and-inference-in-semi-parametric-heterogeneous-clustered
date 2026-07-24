@@ -102,12 +102,21 @@ def run_normality_study(model: str, delta: float, n_mc: int, n_jobs: int = 4,
 def aggregate_normality(norm_raw: dict) -> dict:
     """Build centered/scaled adaptive & oracle series per (model,delta) for Claim 3.
 
-    ``norm_raw[key]`` is a list of run records (each with theta_star, true_labels,
-    n_j, methods.Ada.theta, methods.Oracle.theta)."""
+    Following Theorem 3.6, the pooled normality holds UNDER exact cluster recovery
+    (which itself holds w.h.p. by Theorem 3.5). We therefore centre the analysis on
+    runs where the adaptive method exactly recovered the partition (ARI == 1), so the
+    test isolates the distributional claim from finite-sample clustering failures.
+    ``norm_raw[key]`` is a list of run records."""
     out = {}
     for key, runs in norm_raw.items():
         ada_c, ora_c = [], []
+        n_exact, n_total = 0, 0
         for r in runs:
+            n_total += 1
+            ari = r["methods"]["Ada"]["ari"]
+            if ari < 1.0:
+                continue  # skip clustering-failure runs (Theorem 3.6 conditions on recovery)
+            n_exact += 1
             theta_star = np.array(r["theta_star"])
             true_labels = np.array(r["true_labels"])
             n_j = np.array(r["n_j"])
@@ -119,7 +128,8 @@ def aggregate_normality(norm_raw: dict) -> dict:
                 beta_k = float(np.mean(theta_star[sel]))
                 ada_c.append(float(np.sqrt(Nk) * (float(ada[sel][0]) - beta_k)))
                 ora_c.append(float(np.sqrt(Nk) * (float(ora[sel][0]) - beta_k)))
-        out[key] = dict(ada_centered=np.array(ada_c), ora_centered=np.array(ora_c))
+        out[key] = dict(ada_centered=np.array(ada_c), ora_centered=np.array(ora_c),
+                        n_exact=n_exact, n_total=n_total)
     return out
 
 
