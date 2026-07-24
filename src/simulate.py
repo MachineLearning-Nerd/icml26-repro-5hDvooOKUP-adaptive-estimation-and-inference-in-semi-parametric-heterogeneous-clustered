@@ -134,60 +134,74 @@ def _study_equal_n(model, m, K, delta, seed, n_per_task):
         t.true_cluster = int(labels[j])
     return tasks, labels, betas
 
+def _rate_one(model, m, K, delta, seed, nb):
+    from .estimators import est_adaptive
+    from .metrics import rmse
+    tasks, labels, betas = _study_equal_n(model, m, K, delta, seed, nb)
+    n_j = np.array([t.n for t in tasks])
+    theta_star = np.array([t.theta_star for t in tasks])
+    rng = np.random.default_rng(100000 + seed)
+    losses = build_losses(tasks, rng)
+    a = np.array([l.a for l in losses]); b = np.array([l.b for l in losses])
+    pilots = build_pilots(tasks)
+    th, lab = est_adaptive(a, b, pilots)
+    Nk = float(np.mean([n_j[labels == k].sum() for k in range(K)]))
+    return Nk, rmse(th, theta_star)
+
+
 def run_rate_sweep(model: str, n_bases: list[int], delta: float, n_mc: int,
                    n_jobs: int = 4, seed0: int = 0, m: int = 20, K: int = 3) -> list[dict]:
     """Claim 2: vary the per-task sample size and record Ada RMSE vs pooled cluster size N_k."""
-    from .estimators import est_adaptive, oracle_estimate
-    from .metrics import rmse
+    jobs = [(nb, seed0 + i) for nb in n_bases for i in range(n_mc)]
+    res = Parallel(n_jobs=n_jobs, verbose=5)(
+        delayed(_rate_one)(model, m, K, delta, s, nb) for nb, s in jobs)
     points = []
+    idx = 0
     for nb in n_bases:
-        errs = []
-        Nks = []
-        for i in range(n_mc):
-            tasks, labels, betas = _study_equal_n(model, m, K, delta, seed0 + i, nb)
-            n_j = np.array([t.n for t in tasks])
-            theta_star = np.array([t.theta_star for t in tasks])
-            rng = np.random.default_rng(100000 + seed0 + i)
-            losses = build_losses(tasks, rng)
-            a = np.array([l.a for l in losses]); b = np.array([l.b for l in losses])
-            pilots = build_pilots(tasks)
-            th, lab = est_adaptive(a, b, pilots)
-            errs.append(rmse(th, theta_star))
-            Nks.append(float(np.mean([n_j[labels == k].sum() for k in range(K)])))
+        Nks, errs = [], []
+        for _ in range(n_mc):
+            Nk, e = res[idx]; Nks.append(Nk); errs.append(e); idx += 1
         points.append(dict(Nk=float(np.mean(Nks)), rmse=float(np.mean(errs)), n_per_task=nb))
     return points
+
+
+def _het_one(model, m, K, delta, seed, nb):
+    from .estimators import est_adaptive
+    from .metrics import rmse
+    from .metrics import adjusted_rand_index as ari_f
+    from .data import simulate_assignment, beta_centroids, _TASK_BUILDERS
+    rng = np.random.default_rng(seed)
+    labels = simulate_assignment(m, K, rng)
+    betas = beta_centroids(K, delta)
+    Nk = nb * float(np.mean([(labels == k).sum() for k in range(K)]))
+    xi = 1.0 / np.sqrt(Nk)
+    builder = _TASK_BUILDERS[model]
+    tasks = []
+    for j in range(m):
+        theta_j = float(betas[labels[j]]) + xi * rng.standard_normal()
+        tasks.append(builder(j, theta_j, rng, n=nb))
+    for j, t in enumerate(tasks):
+        t.true_cluster = int(labels[j])
+    theta_star = np.array([t.theta_star for t in tasks])
+    rng2 = np.random.default_rng(100000 + seed)
+    losses = build_losses(tasks, rng2)
+    a = np.array([l.a for l in losses]); b = np.array([l.b for l in losses])
+    pilots = build_pilots(tasks)
+    th, lab = est_adaptive(a, b, pilots)
+    return rmse(th, theta_star), ari_f(labels, lab), Nk
 
 
 def run_heterogeneity_sweep(model: str, n_bases: list[int], delta: float, n_mc: int,
                             n_jobs: int = 4, seed0: int = 0, m: int = 20, K: int = 3) -> list[dict]:
     """Claim 4: inject xi = c/sqrt(N_k) within-cluster heterogeneity; check rate preserved."""
-    from .estimators import est_adaptive
-    from .metrics import rmse
-    from .metrics import adjusted_rand_index as ari_f
-    from .data import simulate_assignment, beta_centroids, _TASK_BUILDERS
+    jobs = [(nb, seed0 + i) for nb in n_bases for i in range(n_mc)]
+    res = Parallel(n_jobs=n_jobs, verbose=5)(
+        delayed(_het_one)(model, m, K, delta, s, nb) for nb, s in jobs)
     points = []
+    idx = 0
     for nb in n_bases:
-        errs = []; aris = []
-        for i in range(n_mc):
-            rng = np.random.default_rng(seed0 + i)
-            labels = simulate_assignment(m, K, rng)
-            betas = beta_centroids(K, delta)
-            Nk = nb * float(np.mean([(labels == k).sum() for k in range(K)]))
-            xi = 1.0 / np.sqrt(Nk)  # xi_k = O(N_k^{-1/2})
-            builder = _TASK_BUILDERS[model]
-            tasks = []
-            for j in range(m):
-                theta_j = float(betas[labels[j]]) + xi * rng.standard_normal()
-                tasks.append(builder(j, theta_j, rng, n=nb))
-            for j, t in enumerate(tasks):
-                t.true_cluster = int(labels[j])
-            n_j = np.array([t.n for t in tasks])
-            theta_star = np.array([t.theta_star for t in tasks])
-            rng2 = np.random.default_rng(100000 + seed0 + i)
-            losses = build_losses(tasks, rng2)
-            a = np.array([l.a for l in losses]); b = np.array([l.b for l in losses])
-            pilots = build_pilots(tasks)
-            th, lab = est_adaptive(a, b, pilots)
-            errs.append(rmse(th, theta_star)); aris.append(ari_f(labels, lab))
+        errs, aris = [], []
+        for _ in range(n_mc):
+            e, a, Nk = res[idx]; errs.append(e); aris.append(a); idx += 1
         points.append(dict(Nk=Nk, rmse=float(np.mean(errs)), ari=float(np.mean(aris)), n_per_task=nb))
     return points
