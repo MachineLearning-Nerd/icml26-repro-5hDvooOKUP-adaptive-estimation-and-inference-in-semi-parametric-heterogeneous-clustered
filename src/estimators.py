@@ -203,8 +203,8 @@ def est_armul(a, b, n_j, K_hat, C_lam, n_iter=80):  # (ii): Duan-Wang clustered 
     c, centers = _kmeans_1d(b, K_hat, weights=a)
     for _ in range(n_iter):
         centers = np.array([float(np.sum(a[c == k] * b[c == k]) / a[c == k].sum())
-                            if (c == k).sum() > 0 and a[c == k].sum() > 0 else float(np.mean(b[c == k]))
-                            for k in range(K_hat)])
+                            if (c == k).sum() > 0 and a[c == k].sum() > 0
+                            else float(np.median(b)) for k in range(K_hat)])
         newc = np.argmin(np.abs(b[:, None] - centers[None, :]), axis=1)
         if np.array_equal(newc, c):
             break
